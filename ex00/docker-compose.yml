@@ -5,7 +5,7 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - . :/ex00/app
+      - ${PWD}:/app
       - /app/node_modules
     environment:
       - NODE_ENV=development
@@ -13,5 +13,10 @@ services:
       - WATCHPACK_POLLING=true
       - WDS_SOCKET_HOST=localhost
       - WDS_SOCKET_PORT=3000
+      - FAST_REFRESH=true
+      - REACT_APP_GEMINI_API_KEY=${REACT_APP_GEMINI_API_KEY}
+    env_file:
+      - .env
     stdin_open: true
     tty: true
+    working_dir: /app
