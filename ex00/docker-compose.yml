@@ -1,8 +1,7 @@
-version: '3.8'
 services:
   frontend:
     build:
-      context: ./ex00
+      context: .
     ports:
       - "3000:3000"
     volumes:
@@ -11,5 +10,8 @@ services:
     environment:
       - NODE_ENV=development
       - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+      - WDS_SOCKET_HOST=localhost
+      - WDS_SOCKET_PORT=3000
     stdin_open: true
     tty: true
