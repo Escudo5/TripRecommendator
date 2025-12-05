@@ -1,117 +1,92 @@
-import React, { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import React, { useEffect, useRef } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap, MapContainerProps } from 'react-leaflet';
 import L from 'leaflet';
-import { Location } from '../types';
-import { geocodingService, GeocodingResult } from '../services/geocodingService';
+import type { Location } from '../types';
+import 'leaflet/dist/leaflet.css';
 
-// Fix para iconos de Leaflet en Webpack
-import icon from 'leaflet/dist/images/marker-icon.png';
-import iconShadow from 'leaflet/dist/images/marker-shadow.png';  // ← SIN ESPACIO
+// icon urls for bundlers
+import iconUrl from 'leaflet/dist/images/marker-icon.png';
+import iconShadowUrl from 'leaflet/dist/images/marker-shadow.png';
 
-let DefaultIcon = L.icon({
-  iconUrl: icon,
-  shadowUrl: iconShadow,
+const DefaultIcon = L.icon({
+  iconUrl,
+  shadowUrl: iconShadowUrl,
   iconSize: [25, 41],
-  iconAnchor: [12, 41]
+  iconAnchor: [12, 41],
 });
 
-L. Marker.prototype.options.icon = DefaultIcon;
+(L.Marker.prototype as any).options.icon = DefaultIcon;
 
 interface MapViewProps {
-  locations: Location[];
+  locations?: Array<Location | null>;
+  mapProps?: Partial<MapContainerProps>;
+  // control whether popups show the numeric coords (default false)
+  showCoordsInPopup?: boolean;
 }
 
-function FitBounds({ locations }: { locations: GeocodingResult[] }) {
+function FitBounds({ locations }: { locations: Location[] }) {
   const map = useMap();
 
   useEffect(() => {
-    if (locations.length > 0) {
-      const bounds = L.latLngBounds(
-        locations.map(loc => [loc.coordinates.lat, loc.coordinates.lng])
-      );
-      map. fitBounds(bounds, { padding: [50, 50] });
-    }
-  }, [locations, map]);
+    if (!map) return;
+    const valid = locations.filter(l => l && typeof l.lat === 'number' && typeof l.lng === 'number') as Location[];
+    if (valid.length === 0) return;
+
+    const latlngs = valid.map(l => L.latLng(l.lat as number, l.lng as number));
+    const bounds = L.latLngBounds(latlngs);
+    map.fitBounds(bounds, { padding: [50, 50] });
+  }, [map, locations]);
 
   return null;
 }
 
-export const MapView: React.FC<MapViewProps> = ({ locations }) => {
-  const [geocodedLocations, setGeocodedLocations] = useState<GeocodingResult[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+const MapView: React.FC<MapViewProps> = ({ locations = [], mapProps = {}, showCoordsInPopup = false }) => {
+  // filter and ensure numeric coords
+  const safeLocations = locations.filter((l): l is Location => !!l && typeof l.lat === 'number' && typeof l.lng === 'number');
 
+  const defaultCenter: [number, number] = [0, 0];
+  const center: [number, number] =
+    safeLocations.length > 0
+      ? [
+          safeLocations.reduce((s, l) => s + (l.lat ?? 0), 0) / safeLocations.length,
+          safeLocations.reduce((s, l) => s + (l.lng ?? 0), 0) / safeLocations.length,
+        ]
+      : defaultCenter;
+
+  const mapRef = useRef<any>(null);
   useEffect(() => {
-    const geocodeLocations = async () => {
-      setIsLoading(true);
-      const placeNames = locations.map(loc => loc.name);
-      const results = await geocodingService. geocodeMultiple(placeNames);
-      setGeocodedLocations(results);
-      setIsLoading(false);
-    };
-
-    if (locations.length > 0) {
-      geocodeLocations();
-    } else {
-      setIsLoading(false);
+    const m = mapRef.current;
+    if (m && typeof m.invalidateSize === 'function') {
+      setTimeout(() => m.invalidateSize(), 200);
     }
-  }, [locations]);
-
-  if (isLoading) {
-    return (
-      <div className="w-full h-96 bg-white rounded-lg shadow-lg flex items-center justify-center">
-        <div className="text-center">
-          <div className="flex gap-1 justify-center mb-3">
-            <div className="w-3 h-3 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-            <div className="w-3 h-3 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-            <div className="w-3 h-3 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-          </div>
-          <p className="text-gray-600">Cargando mapa...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (geocodedLocations.length === 0) {
-    return (
-      <div className="w-full h-96 bg-white rounded-lg shadow-lg flex items-center justify-center">
-        <div className="text-center">
-          <span className="text-6xl mb-4 block">🗺️</span>
-          <p className="text-gray-600">No hay ubicaciones para mostrar</p>
-          <p className="text-sm text-gray-500 mt-2">
-            Pregunta por destinos en el chat para verlos aquí
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  const centerLat = geocodedLocations. reduce((sum, loc) => sum + loc.coordinates.lat, 0) / geocodedLocations.length;
-  const centerLng = geocodedLocations.reduce((sum, loc) => sum + loc.coordinates.lng, 0) / geocodedLocations.length;
+  }, [safeLocations.length]);
 
   return (
-    <div className="w-full h-96 bg-white rounded-lg shadow-lg overflow-hidden">
+    <div style={{ height: '100%', width: '100%' }}>
       <MapContainer
-        center={[centerLat, centerLng]}
-        zoom={6}
+        whenCreated={(mapInstance) => {
+          mapRef.current = mapInstance;
+        }}
+        center={center}
+        zoom={safeLocations.length > 0 ? 6 : 2}
         style={{ height: '100%', width: '100%' }}
+        {...(mapProps as any)}
       >
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          attribution='&copy; <a href="https://osm.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        
-        <FitBounds locations={geocodedLocations} />
 
-        {geocodedLocations.map((loc, index) => (
-          <Marker
-            key={index}
-            position={[loc.coordinates.lat, loc.coordinates.lng]}
-          >
+        {safeLocations.length > 0 && <FitBounds locations={safeLocations} />}
+
+        {safeLocations.map((loc, idx) => (
+          <Marker key={idx} position={[loc.lat as number, loc.lng as number]}>
             <Popup>
-              <div className="text-center">
-                <p className="font-bold text-lg">{loc.name}</p>
-                {loc.displayName && (
-                  <p className="text-xs text-gray-600 mt-1">{loc.displayName}</p>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontWeight: 700 }}>{loc.displayName ?? loc.name}</div>
+                {/* Only show numeric coords in the popup when explicitly enabled */}
+                {showCoordsInPopup && typeof loc.lat === 'number' && typeof loc.lng === 'number' && (
+                  <div style={{ fontSize: 12, color: '#666' }}>{loc.lat.toFixed(5)}, {loc.lng.toFixed(5)}</div>
                 )}
               </div>
             </Popup>
@@ -121,3 +96,5 @@ export const MapView: React.FC<MapViewProps> = ({ locations }) => {
     </div>
   );
 };
+
+export default MapView;

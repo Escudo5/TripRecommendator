@@ -1,4 +1,5 @@
 import { Message } from '../types';
+import { geocodeMultiple, GeocodingResult } from './geocodingService';
 
 export interface AIServiceConfig {
   apiKey?: string;
@@ -7,165 +8,199 @@ export interface AIServiceConfig {
 
 class AIService {
   private apiKey: string | null = null;
-  private useMock: boolean = true;
+  private modelName: string = 'models/gemini-2.5-flash';
+  private useMock = false;
 
   constructor() {
-    const envApiKey = process.env. REACT_APP_GEMINI_API_KEY;
+    const envApiKey = process.env.REACT_APP_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
     if (envApiKey) {
-      this.configure({ apiKey: envApiKey });
+      this.apiKey = envApiKey;
+      this.useMock = false;
     } else {
-      console.log('⚠️ No API key found, using MOCK mode');
+      this.useMock = true;
     }
   }
 
   configure(config: AIServiceConfig) {
-    this.apiKey = config.apiKey || null;
-    this.useMock = ! this.apiKey;
-
-    console.log('🤖 AI Service configured:', this.useMock ? '🔧 MOCK MODE' : '✨ GEMINI API MODE');
+    if (config.apiKey) {
+      this.apiKey = config.apiKey;
+      this.useMock = false;
+    }
+    if (config.model) this.modelName = config.model;
   }
 
   async getResponse(userMessage: string): Promise<Message> {
-    if (this.useMock) {
-      return this.getMockResponse(userMessage);
-    } else {
-      return this.getGeminiResponse(userMessage);
-    }
+    if (this.useMock) return this.getMockResponse(userMessage);
+    return this.getGeminiResponse(userMessage);
   }
 
   private getMockResponse(userMessage: string): Promise<Message> {
-    const lowerMessage = userMessage.toLowerCase();
-    
-    let response: Message;
-
-    if (lowerMessage.includes('playa')) {
-      response = {
-        sender: 'ai',
-        text: 'Te recomiendo Costa Brava (España), Algarve (Portugal) y las playas de Albania.',
-        locations: [
-          { name: 'Costa Brava, España' },
-          { name: 'Algarve, Portugal' },
-          { name: 'Albania' }
-        ]
-      };
-    } else if (lowerMessage.includes('montaña') || lowerMessage.includes('montana')) {
-      response = {
-        sender: 'ai',
-        text: 'Te sugiero los Alpes Suizos, los Pirineos y los Dolomitas en Italia.',
-        locations: [
-          { name: 'Alpes Suizos' },
-          { name: 'Pirineos' },
-          { name: 'Dolomitas, Italia' }
-        ]
-      };
-    } else if (lowerMessage.includes('ciudad')) {
-      response = {
-        sender: 'ai',
-        text: 'Para ciudades te recomiendo Barcelona, Lisboa y Ámsterdam.',
-        locations: [
-          { name: 'Barcelona, España' },
-          { name: 'Lisboa, Portugal' },
-          { name: 'Ámsterdam, Países Bajos' }
-        ]
-      };
-    } else {
-      response = {
-        sender: 'ai',
-        text: '¿Qué tipo de destino buscas?  Puedo ayudarte con playa, montaña o ciudad.'
-      };
+    const lower = userMessage.toLowerCase();
+    if (lower.includes('playa')) {
+      const locations = [
+        { name: 'Cancún, México', displayName: 'Cancún, México', lat: 21.1619, lng: -86.8515 },
+        { name: 'Tulum, México', displayName: 'Tulum, México', lat: 20.2110, lng: -87.4654 },
+        { name: 'Playa del Carmen, México', displayName: 'Playa del Carmen, México', lat: 20.6296, lng: -87.0739 }
+      ];
+      const text = `¡Perfecto! Te propongo estas playas: ${locations.map(l => l.displayName).join(', ')}.`;
+      return Promise.resolve({ sender: 'ai', text, locations } as Message);
     }
-
-    return new Promise(resolve => setTimeout(() => resolve(response), 500));
+    return Promise.resolve({ sender: 'ai', text: 'No tengo sugerencias para eso por ahora.', locations: [] } as Message);
   }
 
   private async getGeminiResponse(userMessage: string): Promise<Message> {
     try {
-      if (! this.apiKey) {
-        throw new Error('API key not found');
-      }
+      if (!this.apiKey) throw new Error('API key not found');
 
-      const prompt = `Eres un asistente de viajes experto.  El usuario te pregunta: "${userMessage}"
+      const prompt = `Eres un asistente de viajes. El usuario pregunta: "${userMessage}"
 
-Responde de forma amigable y recomienda 2-3 destinos específicos.  
-IMPORTANTE: Tu respuesta debe seguir EXACTAMENTE este formato JSON:
+RESPONDE EXCLUSIVAMENTE CON UN JSON VÁLIDO (SIN TEXTO EXTRA) en uno de estos formatos (PRIMERO PREFERIBLE):
 
+1) Objeto con text y locations (cada location puede incluir lat/lng):
 {
-  "text": "Tu respuesta amigable aquí",
+  "text": "Texto para mostrar en el chat",
   "locations": [
-    {"name": "Ciudad, País"},
-    {"name": "Ciudad, País"}
+    {"name":"Cancún, México", "lat": 21.1619, "lng": -86.8515},
+    {"name":"Tulum, México", "lat": 20.2110, "lng": -87.4654}
   ]
 }
 
-Ejemplo:
-{
-  "text": "¡Excelente elección! Para playas te recomiendo estas opciones increíbles:",
-  "locations": [
-    {"name": "Cancún, México"},
-    {"name": "Maldivas"},
-    {"name": "Bali, Indonesia"}
-  ]
-}
+2) O un ARRAY simple de objetos (si no puedes incluir 'text'):
+[
+  {"name":"Phuket, Tailandia", "lat": 7.8804, "lng": 98.3923},
+  {"name":"Bali, Indonesia", "lat": -8.3405, "lng": 115.0920}
+]
 
-Responde SOLO con el JSON, sin texto adicional.`;
+Si no puedes dar coordenadas exactas, devuelve al menos los nombres en el campo 'name'.  
+IMPORTANTE: Si devuelves 'text' debe ser el texto que se muestre en el chat.`;
 
-      console.log('📡 Llamando a Gemini API...');
+      const url = `https://generativelanguage.googleapis.com/v1/${this.modelName}:generateContent?key=${this.apiKey}`;
+      const body = { contents: [{ parts: [{ text: prompt }] }] };
 
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${this.apiKey}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            contents: [{
-              parts: [{
-                text: prompt
-              }]
-            }]
-          })
-        }
-      );
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('❌ Error de API:', errorData);
-        throw new Error(`API Error: ${response.status}`);
+      if (!res.ok) {
+        let errBody;
+        try { errBody = await res.json(); } catch { errBody = await res.text(); }
+        throw new Error(`API Error: ${res.status}: ${JSON.stringify(errBody)}`);
       }
 
-      const data = await response.json();
-      console.log('✅ Respuesta de Gemini:', data);
+      const data = await res.json();
+      const candidateText = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      const text = String(candidateText || '').trim();
 
-      const text = data.candidates[0].content.parts[0].text;
+      // Extract JSON (object or array) if present
+      const jsonMatch = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/m);
+      let names: string[] = [];
+      let parsedTextField: string | null = null;
+      let parsedLocationsFromModel: Array<{ name?: string; lat?: number | string; lng?: number | string }> = [];
 
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        const parsedResponse = JSON.parse(jsonMatch[0]);
-        
-        return {
-          sender: 'ai',
-          text: parsedResponse.text,
-          locations: parsedResponse.locations || []
-        };
-      } else {
-        console.warn('⚠️ Gemini no devolvió JSON válido');
-        return {
-          sender: 'ai',
-          text: text,
-          locations: []
-        };
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (Array.isArray(parsed)) {
+            parsedLocationsFromModel = parsed.map((el: any) => ({
+              name: el?.name,
+              lat: el?.lat,
+              lng: el?.lng
+            }));
+            names = parsedLocationsFromModel.map(p => p.name).filter(Boolean as any);
+          } else if (parsed && Array.isArray(parsed.locations)) {
+            parsedTextField = typeof parsed.text === 'string' ? parsed.text : null;
+            parsedLocationsFromModel = parsed.locations.map((el: any) => ({
+              name: el?.name,
+              lat: el?.lat,
+              lng: el?.lng
+            }));
+            names = parsedLocationsFromModel.map(p => p.name).filter(Boolean as any);
+          } else if (parsed && parsed.name) {
+            parsedLocationsFromModel = [{ name: parsed.name, lat: parsed.lat, lng: parsed.lng }];
+            names = [parsed.name];
+            parsedTextField = typeof parsed.text === 'string' ? parsed.text : null;
+          }
+        } catch {
+          // ignore parse errors, we fallback to heuristics
+        }
       }
 
-    } catch (error: any) {
-      console.error('❌ Error calling Gemini API:', error);
-      
+      // Heuristic: find "City, Country" occurrences
+      if (names.length === 0) {
+        const placeRegex = /([A-ZÁÉÍÓÚÑ][\wáéíóúñü\-\.\s']+,\s*[A-ZÁÉÍÓÚÑ\wáéíóúñü\.\-]+)/g;
+        const matches = Array.from(String(text).matchAll(placeRegex)).map(m => m[0]).slice(0, 8);
+        if (matches.length > 0) {
+          names = Array.from(new Set(matches.map(s => s.trim())));
+        }
+      }
+
+      // Build normalized locations with numeric lat/lng when possible
+      let normalizedLocations: Array<{ name: string; lat?: number; lng?: number; displayName?: string | null }> = [];
+
+      if (parsedLocationsFromModel.length > 0 && parsedLocationsFromModel.some(p => p?.lat != null && p?.lng != null)) {
+        normalizedLocations = parsedLocationsFromModel.map(p => {
+          const latNum = p.lat != null ? Number(p.lat) : undefined;
+          const lngNum = p.lng != null ? Number(p.lng) : undefined;
+          return {
+            name: p.name ?? '',
+            lat: Number.isFinite(latNum) ? latNum : undefined,
+            lng: Number.isFinite(lngNum) ? lngNum : undefined,
+            displayName: p.name ?? null
+          };
+        });
+      } else if (names.length > 0) {
+        // fallback: geocode names in client (may fail due to CORS/rate limits)
+        try {
+          const geocoded = await geocodeMultiple(names);
+          normalizedLocations = geocoded.map((g, i) => {
+            const name = names[i] ?? `loc${i}`;
+            if (g && g.lat != null && g.lng != null) {
+              const latNum = Number(g.lat);
+              const lngNum = Number(g.lng);
+              return {
+                name,
+                lat: Number.isFinite(latNum) ? latNum : undefined,
+                lng: Number.isFinite(lngNum) ? lngNum : undefined,
+                displayName: g.displayName ?? name
+              };
+            }
+            // no coords found
+            return { name, displayName: name };
+          });
+        } catch {
+          normalizedLocations = names.map(n => ({ name: n, displayName: n }));
+        }
+      }
+
+      // Build final display text: prefer parsedTextField, else use text before JSON; always add "Lugares sugeridos" if needed
+      let displayText = parsedTextField ?? text;
+      if (jsonMatch) {
+        displayText = displayText.replace(jsonMatch[0], '').trim() || displayText;
+      }
+      if (!displayText) displayText = 'Aquí tienes algunas opciones:';
+
+      const cleanNames = normalizedLocations
+        .map(l => (l ? (l.displayName ?? l.name) : undefined))
+        .filter((x): x is string => typeof x === 'string' && x.length > 0);
+
+      if (cleanNames.length > 0) {
+        const lower = displayText.toLowerCase();
+        const includeAll = cleanNames.every((nm) => lower.includes(nm.toLowerCase()));
+        if (!includeAll) displayText = `${displayText}\n\nLugares sugeridos: ${cleanNames.join(', ')}`;
+      }
+
       return {
         sender: 'ai',
-        text: 'Lo siento, hubo un error al procesar tu petición. Por favor intenta de nuevo.'
-      };
+        text: displayText,
+        locations: normalizedLocations as any
+      } as Message;
+    } catch {
+      return { sender: 'ai', text: 'Lo siento, hubo un error procesando tu petición.', locations: [] } as Message;
     }
   }
 }
 
 export const aiService = new AIService();
+export default aiService;

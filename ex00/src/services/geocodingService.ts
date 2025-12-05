@@ -1,68 +1,59 @@
-export interface Coordinates {
-  lat: number;
-  lng: number;
-}
+// src/services/geocodingService.ts
+// Cliente-only geocoding (Nominatim). Minimal/no console output to keep console clean.
 
-export interface GeocodingResult {
+export interface Location {
   name: string;
-  coordinates: Coordinates;
-  displayName?: string;
+  lat?: number;
+  lng?: number;
+  displayName?: string | null;
+}
+export type GeocodingResult = Location | null;
+
+async function timeout(ms: number) {
+  return new Promise(res => setTimeout(res, ms));
 }
 
-class GeocodingService {
-  private cache: Map<string, Coordinates> = new Map();
+async function fetchWithTimeout(url: string, options: RequestInit = {}, t = 8000): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), t);
+  const res = await fetch(url, { ...options, signal: controller.signal });
+  clearTimeout(id);
+  return res;
+}
 
-  // Geocodificar usando Nominatim (OpenStreetMap - gratis)
-  async geocode(placeName: string): Promise<GeocodingResult | null> {
-    // Verificar caché
-    if (this.cache.has(placeName)) {
-      return {
-        name: placeName,
-        coordinates: this.cache.get(placeName)! 
-      };
-    }
-
+async function geocodeOne(name: string, attempts = 2): Promise<GeocodingResult> {
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(name)}`;
+  for (let i = 0; i < attempts; i++) {
     try {
-      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(placeName)}&limit=1`;
-      
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'TripRecommendator/1.0'
-        }
-      });
-
-      const data = await response.json();
-
-      if (data.length > 0) {
-        const result = data[0];
-        const coordinates: Coordinates = {
-          lat: parseFloat(result.lat),
-          lng: parseFloat(result. lon)
-        };
-
-        // Guardar en caché
-        this.cache.set(placeName, coordinates);
-
-        return {
-          name: placeName,
-          coordinates,
-          displayName: result.display_name
-        };
+      const res = await fetchWithTimeout(url, {}, 8000);
+      if (!res.ok) {
+        await timeout(500 * (i + 1));
+        continue;
       }
-
-      return null;
-    } catch (error) {
-      console.error('Error geocoding:', placeName, error);
-      return null;
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length === 0) return null;
+      const item = data[0];
+      return {
+        name,
+        lat: item.lat ? parseFloat(item.lat) : undefined,
+        lng: item.lon ? parseFloat(item.lon) : undefined,
+        displayName: item.display_name || null
+      };
+    } catch {
+      await timeout(400 * (i + 1));
     }
   }
-
-  // Geocodificar múltiples lugares
-  async geocodeMultiple(placeNames: string[]): Promise<GeocodingResult[]> {
-    const promises = placeNames.map(name => this.geocode(name));
-    const results = await Promise.all(promises);
-    return results. filter(r => r !== null) as GeocodingResult[];
-  }
+  return null;
 }
 
-export const geocodingService = new GeocodingService();
+export async function geocodeName(name: string): Promise<GeocodingResult> {
+  return geocodeOne(name, 2);
+}
+
+export async function geocodeMultiple(names: string[]): Promise<GeocodingResult[]> {
+  const promises = names.map(n => geocodeOne(n).catch(() => null));
+  return Promise.all(promises);
+}
+
+export const geocodingService = { geocodeName, geocodeMultiple };
+export default geocodingService;

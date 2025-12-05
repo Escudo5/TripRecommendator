@@ -1,154 +1,158 @@
 import React, { useState } from 'react';
 import { Message } from './types';
 import { aiService } from './services/aiService';
-import {MapView} from './Components/MapView';
+import MapView from './Components/MapView';
 
-function App() 
-{
+type ChatMessage = Message & { typing?: boolean };
 
-  // creamos array con 2 posiciones, en la primera guardamos el valor actual del estado(Messages con sus atributos). 
-  // Posicion 2 guarda la funcion para cambiar el valor de mensajes
-  const [messages, setMessages] = useState<Message[]>([
+function TypingDots() {
+  return (
+    <>
+      <style>{`
+        .typing {
+          display: inline-block;
+          padding: 8px 12px;
+          border-radius: 18px;
+          background: #ffffff;
+          color: #333;
+        }
+        .dots {
+          display: inline-block;
+          vertical-align: middle;
+        }
+        .dot {
+          display: inline-block;
+          width: 6px;
+          height: 6px;
+          margin: 0 2px;
+          background: #666;
+          border-radius: 50%;
+          opacity: 0.3;
+          transform: translateY(0);
+          animation: blink 1s infinite;
+        }
+        .dot:nth-child(1) { animation-delay: 0s; }
+        .dot:nth-child(2) { animation-delay: 0.15s; }
+        .dot:nth-child(3) { animation-delay: 0.3s; }
+
+        @keyframes blink {
+          0% { opacity: 0.3; transform: translateY(0); }
+          30% { opacity: 1; transform: translateY(-4px); }
+          60% { opacity: 0.3; transform: translateY(0); }
+          100% { opacity: 0.3; transform: translateY(0); }
+        }
+      `}</style>
+
+      <div className="typing">
+        <div className="dots" aria-hidden>
+          <span className="dot" />
+          <span className="dot" />
+          <span className="dot" />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function App(): JSX.Element {
+  const [messages, setMessages] = useState<ChatMessage[]>([
     { sender: 'user', text: 'Quiero ir a la playa' },
     { sender: 'ai', text: 'Te recomiendo Costa Brava, España' },
   ]);
-
   const [inputText, setInputText] = useState<string>('');
-  const [showMap, setShowMap] = useState<boolean>(false);
+  const [showMap, setShowMap] = useState<boolean>(true);
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
+  const handleSend = async () => {
+    const text = inputText.trim();
+    if (!text || isLoading) return;
 
-  // Funcion asincrona, puede usar wait
-  const handleSend = async () => 
-    {
-      if (inputText.trim() === '') return;
-      if (isLoading) return;
+    const userMessage: ChatMessage = { sender: 'user', text };
+    const typingPlaceholder: ChatMessage = { sender: 'ai', text: '', typing: true };
 
-      // Mensaje del usuario
-      const userMessage: Message = 
-      {
-        sender: 'user',
-        text: inputText
-      };
+    setMessages(prev => [...prev, userMessage, typingPlaceholder]);
+    setInputText('');
+    setIsLoading(true);
 
-      // Añadir mensaje del usuario inmediatamente
-      setMessages(prev => [...prev, userMessage]);
-      const currentInput = inputText;
-      setInputText('');
-      setIsLoading(true);
+    try {
+      const aiResponse = await aiService.getResponse(userMessage.text);
 
-      try 
-      {
-        // Obtener respuesta de la IA (async)
-        const aiResponse = await aiService.getResponse(currentInput);
-        
-        // Añadir respuesta de la IA
-        setMessages(prev => [...prev, aiResponse]);
-      } 
-      catch (error) 
-      {
-        console.error('Error getting AI response:', error);
-        const errorMessage: Message = 
-        {
-          sender: 'ai',
-          text: 'Lo siento, hubo un error.  Intenta de nuevo.'
-        };
-        setMessages(prev => [...prev, errorMessage]);
-      } 
-      finally 
-      {
-        setIsLoading(false);
+      // No modificamos ni quitamos locations: las mantendremos para el mapa,
+      // pero sustituimos el placeholder por el texto final (ya saneado en aiService).
+      setMessages(prev => {
+        const idx = prev.map(m => m.typing ? 1 : 0).lastIndexOf(1);
+        if (idx >= 0) {
+          const copy = [...prev];
+          copy[idx] = aiResponse as ChatMessage;
+          return copy;
+        }
+        return [...prev, aiResponse as ChatMessage];
+      });
+    } catch {
+      setMessages(prev => {
+        const idx = prev.map(m => m.typing ? 1 : 0).lastIndexOf(1);
+        const errMsg: ChatMessage = { sender: 'ai', text: 'Lo siento, hubo un error interno.', locations: [] };
+        if (idx >= 0) {
+          const copy = [...prev];
+          copy[idx] = errMsg;
+          return copy;
+        }
+        return [...prev, errMsg];
+      });
+    } finally {
+      setIsLoading(false);
     }
   };
 
+  // helper: get last AI message for map (ignore typing placeholders)
+  const getLastAIMessage = (): Message | undefined => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].sender === 'ai' && !messages[i].typing) return messages[i];
+    }
+    return undefined;
+  };
+
+  const aiMessage = getLastAIMessage();
+
   return (
     <div className="min-h-screen bg-gray-100 p-4">
-      <h1 className="text-3xl font-bold mb-4">🌍 Trip Recommendator</h1>
-      
-      {/* Chat */}
-      {! showMap && (
-        <div className="space-y-2 mb-4">
-          {messages.map((msg, index) => (
-            <div 
-              key={index}
-              className={`
-                p-3 rounded-lg max-w-md
-                ${msg.sender === 'user' 
-                  ? 'bg-blue-500 text-white ml-auto' 
-                  : 'bg-white text-gray-800'
-                }
-              `}
-            >
-              {msg.text}
-            </div>
-          ))}
-        </div>
-      )}
+      <h1 className="text-3xl font-bold mb-4">Trip Recommendator 🌍</h1>
 
-      {/* Indicador de carga */}
-      {! showMap && isLoading && (
-        <div className="flex items-center gap-2 p-3 bg-white rounded-lg max-w-md mb-4">
-          <div className="flex gap-1">
-            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+      <div className="space-y-2 mb-4">
+        {messages.map((m, idx) => (
+          <div key={idx} className={m.sender === 'user' ? 'text-right' : 'text-left'}>
+            {m.typing ? (
+              <div style={{ display: 'inline-block', padding: 8 }}>
+                <TypingDots />
+              </div>
+            ) : (
+              <>
+                <div className={`inline-block rounded-lg px-4 py-2 ${m.sender === 'user' ? 'bg-blue-500 text-white' : 'bg-white text-gray-800'}`}>
+                  {m.text}
+                </div>
+
+                {/* NOTA: removida la lista de locations para evitar duplicados en el chat.
+                    Las locations siguen disponibles en el objeto Message para el mapa. */}
+              </>
+            )}
           </div>
-          <span className="text-gray-500 text-sm">La IA está pensando...</span>
-        </div>
-      )}
+        ))}
+      </div>
 
-      {/* Mapa (placeholder) */}
-{/* Mapa */}
-        {showMap && (
-          <div className="mt-4">
-            {(() => {
-              const allLocations = messages
-                .filter(msg => msg. sender === 'ai' && msg.locations)
-                .flatMap(msg => msg.locations! );
-              
-              return (
-                <>
-                  <div className="mb-4 p-4 bg-white rounded-lg shadow">
-                    <h2 className="text-xl font-bold mb-2">🗺️ Ubicaciones sugeridas</h2>
-                    <p className="text-sm text-gray-600">
-                      {allLocations.length} ubicación{allLocations.length !== 1 ? 'es' : ''} encontrada{allLocations.length !== 1 ? 's' : ''}
-                    </p>
-                  </div>
-                  <MapView locations={allLocations} />
-                </>
-              );
-            })()}
-          </div>
-        )}
-
-      {/* Input */}
-      <div className="mt-4 flex gap-2">
-        <input 
-          type="text"
+      <div className="flex gap-2 items-center mb-4">
+        <input
+          className="flex-1 p-2 rounded border"
           placeholder="Escribe tu destino..."
-          className="flex-1 p-3 rounded-lg border border-gray-300 disabled:opacity-50"
           value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          onKeyPress={(e) => {
-            if (e.key === 'Enter' && !isLoading) {
-              handleSend();
-            }
-          }}
-          disabled={isLoading}
+          onChange={e => setInputText(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') handleSend(); }}
         />
-        <button 
-          onClick={handleSend}
-          disabled={isLoading}
-          className="bg-blue-500 text-white px-6 py-3 rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isLoading ? 'Enviando.. .' : 'Enviar'}
-        </button>
-        <button 
-          onClick={() => setShowMap(! showMap)}
-          className="bg-green-500 text-white px-6 py-3 rounded-lg hover:bg-green-600"
-        >
-          {showMap ? '💬 Chat' : '🗺️ Mapa'}
-        </button>
+        <button className="px-4 py-2 bg-blue-500 text-white rounded" onClick={handleSend} disabled={isLoading}>Enviar</button>
+        <button className="px-4 py-2 bg-green-500 text-white rounded" onClick={() => setShowMap(s => !s)}>{showMap ? 'Ocultar mapa' : 'Mostrar mapa'}</button>
+      </div>
+
+      <div style={{ marginTop: 16, height: 480 }}>
+        { showMap && <MapView locations={aiMessage?.locations ?? []} showCoordsInPopup={false} /> }
       </div>
     </div>
   );
