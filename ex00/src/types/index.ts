@@ -1,16 +1,15 @@
-// Tipo para los mensajes del chat
-export type Message = {
-  sender: 'user' | 'ai';  // Solo puede ser 'user' o 'ai'
-  text: string;
-  locations?: Location[];  // Opcional: ubicaciones mencionadas
-};
+export interface Location {
+  name: string;
+  // Coordenadas opcionales (se rellenan tras geocodificar)
+  lat?: number;
+  lng?: number;
+  // Nombre legible devuelto por el geocoding (opcional)
+  displayName?: string;
+}
 
-// Tipo para las ubicaciones
-export type Location = {
-  name: string;           // Ej: "Costa Brava"
-  coordinates?: {         // Opcional: se llena cuando se geocodifica
-    lat: number;
-    lng: number;
-  };
-  description?: string;   // Opcional: descripción de la IA
-};
+export interface Message {
+  sender: 'user' | 'ai' | string;
+  text: string;
+  // Opcional: lista de ubicaciones asociadas (puede estar vacía)
+  locations?: Location[];
+}
