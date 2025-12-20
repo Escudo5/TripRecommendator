@@ -269,6 +269,9 @@ ex00/
 </tr>
 </table>
 
+<img width="1263" height="902" alt="image" src="https://github.com/user-attachments/assets/c9c20de4-734e-4bf3-b304-05acebdcf3af" />
+
+
 ---
 
 ## 🤝 Contribuir
